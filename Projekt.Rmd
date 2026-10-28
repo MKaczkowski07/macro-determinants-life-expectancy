@@ -1,0 +1,532 @@
+---
+title: "Makroekonomiczne determinanty oczekiwanej długości życia"
+author: "Mateusz Kaczkowski"
+date: "2026-05-30"
+output: 
+  html_document:
+    theme: lumen
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+
+```{r}
+#Biblioteki
+
+library(readxl)
+library(tidyverse)
+library(stargazer)
+library(psych)
+library(knitr)
+library(kableExtra)
+library(ggrepel)
+library(lmtest)
+library(car)
+library(broom)
+```
+
+
+## Opis zmiennych występujących w danych
+
+| Zmienna | Opis |
+|---|---|
+| Country Name | Nazwa kraju |
+| Country Code | Kod kraju (trzyliterowy, np. POL, DEU) |
+| Life expectancy at birth, total (years) | Oczekiwana długość życia w chwili urodzenia (w latach) |
+| GDP per capita (current US$) | PKB per capita w bieżących dolarach amerykańskich |
+| Current health expenditure (% of GDP) | Bieżące wydatki na ochronę zdrowia jako % PKB |
+| Physicians (per 1,000 people) | Liczba lekarzy na 1000 mieszkańców |
+| People using at least basic drinking water services (% of population) | Odsetek ludności korzystającej z co najmniej podstawowych usług zaopatrzenia w wodę pitną |
+| PM2.5 air pollution, mean annual exposure (micrograms per cubic meter) | Średnie roczne narażenie na zanieczyszczenie powietrza cząstkami PM2.5 (µg/m³) |
+| Urban population (% of total population) | Odsetek ludności miejskiej w populacji ogółem |
+| People using at least basic sanitation services (% of population) | Odsetek ludności korzystającej z co najmniej podstawowych usług sanitarnych |
+| Immunization, DPT (% of children ages 12-23 months) | Odsetek dzieci w wieku 12–23 miesięcy zaszczepionych przeciwko błonicy, tężcowi i krztuścowi (DTP) |
+| School enrollment, secondary (% gross) | Współczynnik skolaryzacji brutto na poziomie szkoły średniej (%) |
+| UE | Zmienna binarna: 1 – kraj jest członkiem Unii Europejskiej, 0 – brak członkostwa |
+| OECD | Zmienna binarna: 1 – kraj jest członkiem OECD, 0 – brak członkostwa |
+
+## Uzasadnienie wyboru
+
+1. **Zmienna objaśniana**
+
+    - **Life expectancy at birth:** Stanowi uniwersalny miernik ogólnego stanu zdrowia populacji, jakości życia oraz stopnia rozwoju społeczno-gospodarczego państw.
+
+2. **Determinanty ekonomiczne**
+
+    - **GDP per capita:** Jeden z podstawowych mierników efektów pracy społeczeństwa danego kraju. Wyższy dochód narodowy na mieszkańca przekłada się na lepsze standardy życia, lepsze odżywianie czy możliwość finansowania zaawansowanych technologii wykorzystywanych w medycynie.
+    - **Current health expenditure:** Odsetek PKB przeznaczany na zdrowie. Dzięki niemu można stwierdzić, ile dany kraj przeznacza pieniędzy na ochronę zdrowia.
+
+3. **Determinanty systemu opieki zdrowotnej**
+
+    - **Physicians (per 1,000 people):** Większa liczba lekarzy skraca czas oczekiwania na diagnozę i leczenie, a także wpływa na dostępność pomocy w nagłych przypadkach.
+    - **Immunization, DPT:** Szczepienia stymulują adaptacyjną odporność organizmu i pomagają zapobiegać chorobom zakaźnym. Gdy duży odsetek populacji jest zaszczepiony, powstaje odporność stadna, która pomaga chronić osoby niezaszczepione.
+
+4. **Determinanty środowiskowe i infrastrukturalne**
+
+    - **PM2.5 air pollution:** Według Światowej Organizacji Zdrowia jest to jedno z najważniejszych środowiskowych zagrożeń dla zdrowia. Badacze z Uniwersytetu w Toronto stwierdzili, że zanieczyszczenie powietrza jest głównym środowiskowym czynnikiem ryzyka chorób sercowo-naczyniowych i przyczynia się do około 2,5 mln zgonów z ich powodu każdego roku.
+    - **People using at least basic drinking water services & People using at least basic sanitation services:** Dostęp mieszkańców do bezpiecznej wody pitnej oraz odpowiednich warunków sanitarnych, takich jak kanalizacja czy toalety, jest jednym z podstawowych elementów wpływających na zdrowie społeczeństwa.
+
+5. **Determinanty społeczno-demograficzne**
+
+    - **School enrollment, secondary:** Jest to kluczowa miara kapitału ludzkiego i rozwoju społecznego. Wyższy poziom wykształcenia przekłada się na większą świadomość zdrowotną, lepsze nawyki żywieniowe, profilaktykę oraz zdolność do unikania ryzykownych zachowań.
+    - **Urban population:** Życie w mieście oznacza łatwiejszy dostęp do wyspecjalizowanych placówek medycznych, ale jednocześnie naraża na specyficzne czynniki ryzyka, takie jak stres i szybkie tempo życia.
+
+6. **Determinanty makroregionalne**
+
+    - **UE oraz OECD:** Przynależność do Unii Europejskiej czy OECD wiąże się z koniecznością implementacji standardów w zakresie prawa pracy, ochrony środowiska, bezpieczeństwa żywności i stabilności politycznej.
+    
+    
+----
+
+## Statystyki opisowe zmiennych w modelu
+
+```{r wczytanie_danych}
+dane <- read_excel("DATA_WDI.xlsx")
+#glimpse(dane_raw)
+
+stats <- describe(dane %>% select(where(is.numeric)))[, c("n", "mean", "median", "sd", "min", "max", "skew", "kurtosis")]
+kable(stats, 
+      digits = 2,                               
+      booktabs = TRUE) %>%                       
+  kable_styling(latex_options = c("striped", "hold_position"), 
+                font_size = 10)                  
+```
+
+
+## Problem braku danych
+Analizując nasze statystki od razu można zauważyć, że występują braki danych dla niektórych
+zmiennych. Klasyczna Metoda Najmniejszych Kwadratów wymaga kompletnej macierzy. Do
+wyboru są dwie opcje - usunięcie konkretnych zmiennych (np. ilość lekarzy na 1000 osób) lub
+usunąć konkretne kraje z brakami danych. Zaletą pierwszej opcji jest zachowanie większej próby,
+co może skutkować większą precyzją estymacji jednak, jeżeli usunięta zmienna była istotna w
+modelu, może wystąpić błąd pominięcia zmiennej (omitted variable bias). W drugiej opcji
+zachowujemy wszystkie zmienne, co czyni nasz model bogatszym, kosztem mniejszej próby (co
+może prowadzić do większych błędów standardowych i mniejszej mocy testów). Warto się
+zastanowić czy braki danych są losowe…
+
+```{r}
+dane_ver1 <- dane %>%
+  rename(
+    country_name = `Country Name`,
+    country_code = `Country Code`,
+    life_exp = `Life expectancy at birth, total (years)`,
+    gdp_pc = `GDP per capita (current US$)`,
+    health_exp_pct = `Current health expenditure (% of GDP)`,
+    physicians = `Physicians (per 1,000 people)`,
+    water_access_pct = `People using at least basic drinking water services (% of population)`,
+    pm25_pollution = `PM2.5 air pollution, mean annual exposure (micrograms per cubic meter)`,
+    urban_pop_pct = `Urban population (% of total population)`,
+    sanitation_pct = `People using at least basic sanitation services (% of population)`,
+    immunization_dpt = `Immunization, DPT (% of children ages 12-23 months)`,
+    school_enrollment = `School enrollment, secondary (% gross)`,
+    ue = UE,
+    oecd = OECD
+  )
+
+#colnames(dane_ver1)
+```
+
+```{r}
+braki <-  dane_ver1 %>%
+  filter(if_any(everything(), is.na)) |> 
+  select(country_name, gdp_pc, physicians, pm25_pollution , immunization_dpt)
+
+kable(braki, 
+      digits = 2,
+      caption = "Kraje, w kótrych wystepują braki danych")
+```
+
+
+Występują braki danych dla czterech krajów. Trzy z nich to mikro państwa (państwo o niewielkim
+obszarze terytorialnym i mające niewielką liczbę ludności): Liechtenstein, Monaco, San Marino.
+Ich gospodarki są na tyle zintegrowane z sąsiadami (np. Liechtenstein ze Szwajcarią, Monaco z
+Francją), że niektóre statystyki są liczone wspólnie z nimi lub ich po prostu nie ma. Ponadto, ich
+modele gospodarcze (raje podatkowe, turystyka, sektor finansowy, mała liczba ludności)
+sprawiają, że wskaźniki takie jak PKB per capita są wyższe niż w standardowych państwach.
+Natomiast Kosovo, w którym również występują braki danych nie jest uznawane przez wszystkich
+za kraj.
+
+
+```{r, fig.width=12, fig.height=6}
+
+dane_var2 <- dane_ver1 %>%
+  mutate(Status = ifelse(country_name %in% c("Liechtenstein", "Monaco", "San Marino", "Kosovo"), 
+                         "Mikropaństwa / Kosowo", "Pozostałe kraje"))
+
+ggplot(dane_var2, aes(x = gdp_pc, y = "Cała próba")) + 
+  geom_boxplot(outlier.shape = NA, alpha = 0.3, width = 0.5) + 
+  geom_point(aes(color = Status, size = Status), alpha = 0.7) + 
+  scale_size_manual(values = c("Mikropaństwa / Kosowo" = 5, "Pozostałe kraje" = 2)) +
+  geom_text_repel(data = filter(dane_var2, Status == "Mikropaństwa / Kosowo"),
+                  aes(label = country_name),
+                  nudge_y = -0.4,          
+                  min.segment.length = 0,  
+                  point.padding = 0.2,     
+                  fontface = "bold") +
+  theme_light() +
+  labs(
+    title = "Pozycja mikropaństw na tle ogólnego rozkładu PKB per capita",
+    y = "", 
+    x = "PKB per capita",
+    color = "Kategoria",
+    size = "Kategoria"
+  ) +
+  theme(
+    axis.text.y = element_blank(), 
+    legend.position = "bottom"     
+  )
+```
+
+Boxplot potwierdza, że mikropaństwa takiej jak jak Monako i Liechtenstein są wartościami odstającymi, a ich pozostawienie mogłoby przyciągnąć linie regresji i zniekształcić wyniki estymacji KMNK. Z kolei San Marino oraz Kosowo, choć nie odstają za bardzo od reszty próby pod względem samego poziomu PKB, to ze względu na wspomnianą wcześniej niewielką liczbę mieszkańców oraz specyficzne uwarunkowania polityczno-gospodarcze nie posiadają kompletnych danych. Z tego powodu, decydujemy się na usunięcie tych czterech krajów z analizy.
+
+```{r}
+dane_kraje_final <- dane_var2 %>%
+  filter(Status == "Pozostałe kraje")
+
+dane_kraje_final <- dane_kraje_final %>%
+  select(-Status)
+```
+
+## Problem asymetrii rozkładu zmiennej PKB per capita
+
+Wracając do pokazanych wcześniej statystyk opisowych warto zauważyć, że zmienna PKB per
+capita wykazuje ogromną rozpiętość wartości (od 3 620 do 193 747 USD). Występuje silna
+prawostronna asymetria (skośność = 2,18) oraz wysoka kurtoza (5,28), co wskazuje na znaczące
+odchylenia od symetrii rozkładu. Biorąc to pod uwagę, stosuje logarytmiczną transformację
+zmiennej PKB per capita, w celu uzyskania bardziej liniowej zależności między tą zmienną a
+oczekiwaną długością życia.
+
+
+## Badanie współczynnika zmienności (V)
+
+Klasyczna Metoda Najmniejszych Kwadratów wymaga wariancji – dane muszą być zróżnicowane, aby model mógł z nich wyciągać wnioski. Aby zmienna objaśniająca niosła użyteczną informację, jej współczynnik zmienności powinien przekraczać 10%. Zmienne poniżej tego progu przyjmują tę samą wartość dla zdecydowanej większości obserwacji i należy je usunąć. 
+
+```{r wsp zmienności}
+zmienne_ilosciowe <- dane_kraje_final[, c("gdp_pc", "health_exp_pct", "physicians", 
+                                    "water_access_pct", "pm25_pollution", 
+                                    "urban_pop_pct", "sanitation_pct", 
+                                    "immunization_dpt", "school_enrollment")]
+
+cv <- sapply(zmienne_ilosciowe, function(x) sd(x) / mean(x) * 100)
+
+cv_tabela <- tibble(
+  Zmienna = names(cv),
+  `Współczynnik zmienności (%)` = round(cv, 2)
+)
+
+cv_tabela %>%
+  kable(caption = "Współczynniki zmienności analizowanych zmiennych", row.names = FALSE) %>%
+  kable_styling(full_width = TRUE)
+```
+
+Z tego co widzimy zmienne 3 zmienne wykazują współczynnik V poniżej 10:
+
+- water_access_pct
+
+- sanitation_pct
+
+- immunization_dpt
+
+Ze statystyk pokazanych na początku można łatwo potwierdzić te wyniki. W przypadku
+dostępu do wody średnia wynosi 98,58 przy odchyleniu standardowym zaledwie 2,36, a mediana
+sięga 99,79 (wskazuje to na minimalną zmienność między krajami w górnym przedziale rozkładu).
+Podobną sytuację jest dla odsetka ludności korzystającej z co najmniej podstawowych usług
+sanitarnych: średnia 97,01, mediana 98,78 i odchylenie standardowe 4,14. Kraje europejskie w
+XXI wieku są wysoko rozwinięte, przez co problemy typowe dla krajów ubogich, takie jak brak
+dostępu do wody pitnej czy podstawowej infrastruktury sanitarnej, praktycznie nie występują.
+Analogicznie, szczepienia przeciwko błonicy, tężcowi i krztuścowi (DTP) są w Europie
+powszechnie dostępne i w wielu krajach obowiązkowe (co jest sytuacją odwrotną dla wielu krajów
+afrykańskich). Przy tak niskim odchyleniu standardowym zmienne te wykazują niemal brak
+zróżnicowania między krajami, co czyni je mało wartościowymi predyktorami. Zmienne te nie
+zostaną uwzględnione w naszym modelu
+
+## Analiza korelacji
+
+```{r}
+library(corrplot)
+
+dane_kraje_final$log_gdp_pc <- log(dane_kraje_final$gdp_pc)
+
+zmienne_do_korelacji <- dane_kraje_final[, c("life_exp", "log_gdp_pc", "health_exp_pct", 
+                                       "physicians", "water_access_pct", 
+                                       "pm25_pollution", "urban_pop_pct", 
+                                       "sanitation_pct", "immunization_dpt", 
+                                       "school_enrollment", "ue", "oecd")]
+
+macierz_korelacji <- cor(zmienne_do_korelacji)
+
+corrplot(macierz_korelacji,
+         method = "color",
+         type = "upper",
+         addCoef.col = "black",
+         number.cex = 0.7,
+         tl.col = "black",
+         tl.srt = 45,
+         diag = FALSE,
+         col = colorRampPalette(c("#B2182B", "white", "#2166AC"))(200))
+```
+
+
+### Relacja zmiennych objaśniających (X) z długością życia (Y)
+
+Macierz korelacji przedstawia, że wysoki poziom zamożności państwa oraz dostęp do infrastruktury sanitarnej bezpośrednio sprzyjają wydłużaniu życia obywateli. Odwrotną, silnie ujemną zależność (-0,62) zaobserwowano natomiast w przypadku zanieczyszczenia powietrza, co jest w pełni spójne z medyczną wiedzą o jego szkodliwości dla zdrowia publicznego.
+
+### Relacja zmiennych objaśniających (X) z innymi zmiennymi objasniającymi 
+
+Z tego co widzimy to żadna ze zmiennych nie koreluje silnie z inną zmienną (przyjąłem próg >0.8). Najwyższą wartość -0.79 osiągnęła PKB per capita z poziomem zanieczyszczenia powietrza. Oznacza to, że bogatsze kraje w Europie mają znacznie czystsze powietrze
+
+Warto zauważyć pewną rzecz:
+
+- water_access_pct $\rightarrow$ korelacja z life_exp = 0.64
+- sanitation_pct $\rightarrow$ korelacja z life_exp = 0.47
+- immunization_dpt $\rightarrow$ korelacja z life_exp = 0.47
+
+Mimo że zmienne water_access_pct, sanitation_pct oraz immunization_dpt wykazują współczynnik zmienności poniżej 10%, macierz korelacji ujawnia ich istotny związek ze zmienną objaśnianą (r = 0,64; 0,47; 0,47).
+
+Niski współczynnik zmienności oznacza, że zmienna jest mało zróżnicowana w próbie, ale nie
+znaczy, że jest nieistotna w rzeczywistości. W tym przypadku kraje europejskie mają podobnie
+wysoki poziom dostępu do wody, więc V jest małe, ale ta wysoka wartość może właśnie
+współtworzyć wysoką oczekiwaną długość życia. Wcześniejsza decyzja o usunięciu tych 3
+zmiennych może prowadzić do wspomnianego wcześniej błędu pominięcia istotnej zmiennej
+objaśniającej. Być może warto będzie przywrócić później zmienną water_access_pct by
+sprawdzić, czy wniesie coś pozytywnego w modelu.
+
+
+## Estymacja modelu i wstępna weryfikacja parametrów
+
+Na początku tworzę model uwzględniający wszystkie osiem potencjalnych zmiennych
+objaśniających.
+
+$$
+LifeExp_i = \beta_0 + \beta_1 \ln(GDP\_PC_i) + \beta_2 HealthExp_i + \beta_3 Physicians_i + \beta_4 PM25_i + \beta_5 UrbanPop_i + \beta_6 SchoolEnroll_i + \beta_7 UE_i + \beta_8 OECD_i + \varepsilon_i
+$$
+
+```{r wstepny model, include=FALSE}
+model_wstepny <- lm(life_exp ~ log_gdp_pc + health_exp_pct + physicians + pm25_pollution + urban_pop_pct + school_enrollment + ue + oecd, data = dane_kraje_final)
+
+summary(model_wstepny)
+```
+
+```{r}
+tidy_model <- tidy(model_wstepny)
+kable(tidy_model, digits = 3, caption = "Parametry modelu wstępnego")
+
+
+glance_model <- glance(model_wstepny)
+kable(glance_model, digits = 3, caption = "Statystyki dopasowania modelu")
+```
+
+
+Choć model wstępny charakteryzuje się skorygowanym $R^2 = 0.7515$, co oznacza, że wyjaśnia on
+około 75% zmienności oczekiwanej długości życia, to analiza wyników testu t-Studenta wykazała,
+że większość wprowadzonych zmiennych okazała się nieistotna statystycznie (p>0.05). Istotność
+wykazały jedynie zmienne `log_gdp_pc` oraz `health_exp_pct`. Wykorzystam metodę krokową
+wsteczną w celu ustalenia optymalnego modelu
+
+
+```{r krokowa wsteczna, results='asis'}
+model_optymalny <- step(model_wstepny, direction = "backward", trace = 0)
+
+stargazer(model_wstepny, model_optymalny, 
+          type = "html", 
+          title = "Wyniki estymacji modeli: Wyjściowego i Zredukowanego",
+          column.labels = c("Model Wyjściowy", "Model Optymalny"),
+          single.row = FALSE)
+```
+
+---
+
+Po odrzuceniu sześciu zmiennych skorygowany $R^2$ wzrósł, co oznacza, że usunięte zmienne stanowiły statystyczny szum. W badanej próbie o długości życia decyduje przede wszystkim zamożność kraju (logarytm PKB per capita) oraz to, jaki procent tego bogactwa jest przeznaczony na system ochrony zdrowia. Metoda krokowa wsteczna wyeliminowała z modelu zmienne zero-jedynkowe ue i oecd ze względu na ich nieistotność statystyczną. Warto zbadać, czy ich wpływ nie ujawnia się dopiero w interakcji ze zmienną log_gdp_pc i nie pozwoli uchwycić zależności, które nie zostały odzwierciedlone w modelu optymalnym.
+
+
+```{r, results='asis'}
+model_interakcja2 <- lm(life_exp ~ log_gdp_pc + health_exp_pct + log_gdp_pc * ue, data = dane_kraje_final)
+
+model_interakcja3 <- lm(life_exp ~ log_gdp_pc + health_exp_pct + log_gdp_pc * oecd, data = dane_kraje_final)
+
+stargazer(model_optymalny, model_interakcja2, model_interakcja3, 
+          type = "html", 
+          title = "Porównanie modelu bazowego z modelami uwzględniającymi interakcje",
+          column.labels = c("Model bazowy", "Interakcja (UE)", "Interakcja (OECD)"),
+          single.row = FALSE)
+```
+
+---
+
+W modelu z interakcją `log_gdp_pc * ue` współczynnik okazał się nieistotny statystycznie (p-value = 0.771). Oznacza to, że członkostwo w UE nie wpływa istotnie na zależność między poziomem PKB a oczekiwaną długością życia. 
+
+Inaczej sytuacja wygląda w modelu z interakcją z OECD: parametry przy wszystkich zmiennych głównych oraz przy członie interakcyjnym `log_gdp_pc:oecd` są istotne statystycznie na poziomie $\alpha = 0.05$. Co więcej, skorygowany $R^2$ wzrósł do 0.7896 w porównaniu do modelu optymalnego. Oznacza to, że uwzględnienie przynależności do OECD i jej interakcji z PKB realnie poprawia zdolność modelu do wyjaśniania długości życia w Europie.
+
+- Dla państw spoza OECD (kiedy zmienna OECD = 0): Wpływ wzrostu zlogarytmowanego PKB na oczekiwaną długość życia wynosi 3.9564. W uboższych krajach, każdy dodatkowy procent PKB daje bardzo silny, zauważalny przyrost długości życia.
+
+- Dla państw OECD (kiedy zmienna OECD = 1): Wpływ wzrostu PKB jest korygowany przez interakcję: 3.9564 - 1.7077 = 2.2487. W krajach wysoko rozwiniętych wpływ wzrostu PKB per capita na długość życia jest znacznie słabszy.
+
+
+```{r}
+dane_kraje_final$OECD_label <- factor(dane_kraje_final$oecd, 
+                                      levels = c(0, 1), 
+                                      labels = c("Państwa spoza OECD", "Państwa OECD"))
+
+ggplot(dane_kraje_final, aes(x = log_gdp_pc, y = life_exp, color = OECD_label)) +
+  geom_point(size = 3, alpha = 0.7) +                  
+  geom_smooth(method = "lm", se = FALSE, size = 1.2) + 
+  labs(title = "Wpływ zlogarytmowanego PKB na długość życia (Efekt interakcji)",
+       x = "Zlogarytmowane PKB per capita",
+       y = "Oczekiwana długość życia (lata)",
+       color = "Grupa państw:") +
+  theme_bw() +                                    
+  theme(legend.position = "bottom") +
+  scale_color_manual(values = c("#D55E00", "#0072B2"))
+```
+
+Model pokazuje działanie prawa malejących dochodów w ochronie zdrowia. Kraje OECD charakteryzują się już wysokim poziomem bazowym oraz rozwiniętą infrastrukturą zdrowotną, dlatego dalszy wzrost PKB per capita przekłada się na relatywnie mniejsze przyrosty oczekiwanej długości życia. W państwach na niższym poziomie rozwoju te same przyrosty dochodu pozwalają natomiast na zaspokojenie podstawowych potrzeb zdrowotnych, co skutkuje silniejszym wpływem wzrostu zamożności na długość życia.
+
+
+## Weryfikacja założeń modelu
+
+### Test t-Studenta
+
+W związku z tym, że statystyki t-Studenta oraz odpowiadające im wartości p-value zostały już
+wyznaczone, przedstawiono pełne wyniki testu::
+
+Przyjmuję poziom istotności: $\alpha = 0.05$
+
+**Hipoteza zerowa ($H_0$):** $\beta_i = 0$ (dla i = 1, 2, 3, 4)
+
+**Hipoteza alternatywna ($H_1$):** $\beta_i \neq 0$
+
+```{r}
+sm_model2 <- summary(model_interakcja2)
+sm_model3 <- summary(model_interakcja3)
+
+t_statystyki <- sm_model3$coefficients[, 3]
+p_wartosci <- sm_model3$coefficients[, 4]
+
+sam_test_t <- sm_model3$coefficients[, c(3, 4)]
+sam_test_t
+```
+
+
+Ponieważ dla każdej zmiennej w modelu wartość `Pr(>|t|)` jest mniejsza niż przyjęty poziom istotności $\alpha = 0.05$, odrzucamy hipotezę zerową na korzyść alternatywnej. 
+
+**Wniosek:** Test t-Studenta potwierdza, że wszystkie pozostawione w modelu parametry są istotnie różne od zera i realnie objaśniają zmienną zależną.
+
+Warto jednak zaznaczyć, że ze względu na obecność interakcji `log_gdp_pc:oecd`, wpływ PKB na długość życia zależy od przynależności kraju do OECD. Istotność parametru przy zmiennej `log_gdp_pc` `(p < 0,001) wskazuje, że w krajach nienależących do OECD wzrost PKB per capita istotnie zwiększa oczekiwaną długość życia. Jednocześnie istotny statystycznie współczynnik przy zmiennej interakcyjnej (p < 0,05) świadczy o tym, że siła tego wpływu różni się między krajami OECD i pozostałymi państwami. Oznacza to, że zależność między poziomem PKB a długością życia jest modyfikowana przez przynależność do OECD.
+
+### Test F
+
+**Hipoteza zerowa ($H_0$):** $\beta_1 = \beta_2 = \beta_3 = \beta_4 = 0$
+
+**Hipoteza alternatywna ($H_1$):** Co najmniej jeden współczynnik jest różny od zera
+
+Ponieważ p-value jest mniejsze od przyjętego poziomu $\alpha = 0.05$ mamy podstawy do odrzucenia hipotezy zerowej na korzyść alternatywnej. 
+Model jako całość jest wysoce istotny statystycznie. Wprowadzone zmienne (log_gdp_pc, health_exp_pct, status oecd oraz ich interakcja) łącznie w sposób istotny wyjaśniają zmienność oczekiwanej długości życia.
+
+
+### Badanie normalności rozkładu reszt (Test Shapiro-Wilka)
+
+Jednym z założeń klasycznego modelu regresji liniowej jest normalność rozkładu reszt. W celu jego weryfikacji dla ostatecznego modelu przeprowadzam test Shapiro–Wilka.
+
+$H_0$: Reszty mają rozkład normalny
+
+$H_1$: ~$H_0$
+
+```{r}
+shapiro_test <- shapiro.test(residuals(model_interakcja3))
+shapiro_test
+```
+
+Otrzymane wyniki:
+
+- Statystyka testowa W = 0.97914
+
+- Wartość p-value = 0.5995
+
+Otrzymana wartość p=0.5995 jest większa od przyjętego poziomu istotności, w związku z tym, nie ma podstaw do odrzucenia hipotezy zerowej. Test potwierdza, że reszty wyestymowanego modelu charakteryzują się rozkładem normalnym. Oznacza to, że założenia Klasycznej Metody Najmniejszych Kwadratów w tym aspekcie zostały w pełni spełnione.
+
+```{r}
+plot(model_interakcja3, which = 2, 
+     main = "Wizualizacja normalności reszt",
+     pch = 19, col = "darkblue")
+```
+
+Wynik testu Shapiro–Wilka znajduje również potwierdzenie na wykresie Q–Q. Punkty odpowiadające resztom modelu układają się blisko linii teoretycznego rozkładu normalnego, a na krańcach rozkładu nie występują istotne odchylenia.
+
+### Badanie stałości wariancji składnika losowego (Test Breuscha-Pagana)
+
+Jednym z założeń Klasycznej Metody Najmniejszych Kwadratów jest wymóg stałej wariancji składnika losowego, czyli homoskedastyczność. W celu weryfikacji tego założenia oraz wykluczenia problemu heteroskedastyczności, przeprowadzam test Breuscha-Pagana.
+
+$H_0$: Wariancja reszt jest stała (homoskedastyczność)
+
+$H_1$: Wariancja składnika losowego nie jest stała (występuje heteroskedastyczność)
+
+```{r}
+bp_test <- bptest(model_interakcja3)
+bp_test
+```
+
+Otrzymane wyniki:
+
+- Statystyka testowa BP = 4.8171
+
+- Stopnie swobody df = 4
+
+- Wartość p-value = 0.3066
+
+Otrzymana wartość p=0.3066 jest większa od przyjętego poziomu istotności, w związku z tym, nie ma podstaw do odrzucenia hipotezy zerowej. Zjawisko heteroskedastyczności nie występuje w badanym modelu. Konsekwencją tego wyniku jest potwierdzenie, że zastosowane estymatory Klasycznej Metody Najmniejszych Kwadratów są nie tylko zgodne i nieobciążone, ale również najefektywniejsze.
+
+### Badanie współliniowości (Test VIF)
+
+W celu weryfikacji braku silnej współliniowości między zmiennymi objaśniającymi obliczam wskaźniki VIF (Variance Inflation Factor).
+
+```{r}
+vif_test <- vif(model_interakcja3)
+vif_test
+```
+
+Wartości VIF dla głównych zmiennych ciągłych w modelu wyniosły 4.34 dla zlogarytmowanego PKB oraz 1.41 dla odsetka wydatków na zdrowie. Obie te wartości znajdują się znacznie poniżej krytycznego progu (VIF = 10), co dowodzi braku szkodliwej współliniowości w danych.
+
+### Badanie poprawności specyfikacji analitycznej (Test Ramseya RESET)
+
+W związku z zastosowaniem nieliniowych przekształceń zmiennych (logarytm naturalny PKB per capita) oraz wprowadzeniem do modelu zmiennej interakcyjnej, konieczna jest weryfikacja poprawności przyjętej formy funkcyjnej
+
+$H_0$: Model posiada poprawną specyfikację analityczną (brak pominiętych powiązań nieliniowych).
+
+$H_1$: Model zawiera błąd specyfikacji (niepoprawna postać analityczna).
+
+```{r}
+reset_test <- resettest(model_interakcja3, power = 2:3, type = "fitted")
+reset_test
+```
+
+Otrzymane wyniki:
+
+- Statystyka testowa RESET = 0.36557
+
+- Stopnie swobody df1 = 2, df2 = 37
+
+- Wartość p-value = 0.6963
+
+Otrzymana wartość p=0.6963 przekracza przyjęty poziom istotności. Zatem nie ma podstaw do odrzucenia hipotezy zerowej o prawidłowej specyfikacji modelu. Ostateczna postać analityczna modelu została dobrana prawidłowo.
+
+## Ostateczna postać modelu
+
+$$
+\begin{aligned}
+\widehat{life\_exp}_i = & \; 37.2159 + 3.9564 \cdot \ln(gdp\_pc_i) + 0.4851 \cdot health\_exp\_pct_i \; + \\
+& 15.9586 \cdot oecd_i - 1.7077 \cdot (\ln(gdp\_pc_i) \cdot oecd_i)
+\end{aligned}
+$$
+
+## Wnioski końcowe
+
+Celem przeprowadzonego badania ekonometrycznego była identyfikacja oraz ocena wpływu wybranych czynników makroekonomicznych i społecznych na oczekiwaną długość życia w państwach europejskich. Z początkowego zestawu potencjalnych czynników (obejmujących m.in. edukację, urbanizację oraz zanieczyszczenie środowiska) algorytm redukcji oparty na kryterium informacyjnym AIC wskazał jako kluczowe dwa czynniki: poziom zamożności kraju (logarytm PKB per capita) oraz udział wydatków na ochronę zdrowia w PKB. Następnie zbadano interakcję między poziomem PKB a przynależnością do OECD. Okazała się ona istotna statystycznie i poprawiła dopasowanie modelu, wskazując, że wpływ PKB na długość życia różni się między krajami OECD i pozostałymi państwami. Ostateczny model charakteryzuje się wysoką zdolnością wyjaśniania badanego zjawiska (skorygowany $R^2$ = 0.79) oznacza, że około 79% zróżnicowania oczekiwanej długości życia pomiędzy analizowanymi państwami jest wyjaśniane przez model. Pozostała część zmienności wynika z czynników nieuwzględnionych w modelu oraz ze składnika losowego, do których można zaliczyć m.in. styl życia czy nawyki żywieniowe.
+
